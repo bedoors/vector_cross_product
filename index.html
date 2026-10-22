@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vector Cross Product Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&display=swap">
+<style>
+/* =====================================================================
+   VECTOR CROSS PRODUCT EXPLORER: two vectors, unit vectors, and torque
+   One self-contained HTML file: no libraries, no build step.
+   Open it in any browser, or upload it to GitHub Pages to share it.
+   A companion to the projectile and dot product explorers.
+
+     <style>   colors, layout, and how the drawings look
+     <body>    the controls, plus SVG surfaces that JavaScript draws on
+     <script>  1 helpers         2 vector maths        3 the three activities
+               4 state           5 the camera          6 the 3D diagram
+               7 little drawings 8 the graph           9 numbers and working
+               10 dragging, turning and zooming         11 wiring
+   ===================================================================== */
+
+/* ---------- Colors ----------
+   Color means which vector: blue = A (or r), orange = B (or F),
+   purple = the cross product A×B (or the torque τ). Everything else is ink. */
+:root {
+  --page: #e8edf1;
+  --paper: #fcfdfe;
+  --grid-minor: #e1e8ee;
+  --grid-major: #c9d5df;
+  --line: #c0ccd6;
+  --ink: #1c2b36;
+  --ink-soft: #52636f;
+  --a: #2d63a6;
+  --b: #a84f0c;
+  --c: #7b3fa0;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #0e1a24;
+    --paper: #13222e;
+    --grid-minor: #1c2d3b;
+    --grid-major: #2a3e4f;
+    --line: #304658;
+    --ink: #e4ecf2;
+    --ink-soft: #9aabb8;
+    --a: #82b3ee;
+    --b: #f2a65e;
+    --c: #cf9ff0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #0e1a24;
+  --paper: #13222e;
+  --grid-minor: #1c2d3b;
+  --grid-major: #2a3e4f;
+  --line: #304658;
+  --ink: #e4ecf2;
+  --ink-soft: #9aabb8;
+  --a: #82b3ee;
+  --b: #f2a65e;
+  --c: #cf9ff0;
+  color-scheme: dark;
+}
+
+/* ---------- Page ---------- */
+:root {
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+*, *::before, *::after { box-sizing: inherit; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 16px/1.45 "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+.app { max-width: 1480px; margin: 0 auto; padding: 28px clamp(16px, 3vw, 40px) 56px; }
+header { max-width: 70ch; margin-bottom: 24px; }
+h1 { font-size: 1.75rem; line-height: 1.15; letter-spacing: -0.01em; margin: 0; }
+header p { margin: 0; color: var(--ink-soft); }
+h2, legend { font-size: 1rem; font-weight: 700; margin: 0 0 12px; padding: 0; }
+.a-text { color: var(--a); }
+.b-text { color: var(--b); }
+.c-text { color: var(--c); }
+
+/* Show only what belongs to the current activity */
+body[data-mode="explore"] :is(.unit-only, .torque-only, .not-explore),
+body[data-mode="unit"] :is(.explore-only, .torque-only, .not-unit),
+body[data-mode="torque"] :is(.explore-only, .unit-only, .not-torque) { display: none !important; }
+
+/* The three activities, as a segmented switch made of real radio buttons */
+.activity { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 14px 0 12px; }
+.modes { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; }
+.modes label { position: relative; }
+.modes input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.modes span { display: block; padding: 7px 16px; border-radius: 7px; font-weight: 700; color: var(--ink-soft); }
+.modes label:hover span { color: var(--ink); }
+.modes input:checked + span { background: var(--ink); color: var(--paper); }
+.modes input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
+@media (max-width: 480px) { .modes span { padding: 7px 9px; font-size: 0.9375rem; } }
+
+/* Wide: controls, diagram, working. Medium: working under the diagram.
+   Phone: diagram, then working, then controls. */
+.layout {
+  display: grid;
+  grid-template-columns: 284px minmax(0, 1fr) 372px;
+  grid-template-areas: "controls stage math";
+  gap: 28px 36px;
+  align-items: start;
+}
+.controls { grid-area: controls; }
+.stage { grid-area: stage; min-width: 0; }
+.math { grid-area: math; min-width: 0; }
+@media (max-width: 1239px) {
+  .layout { grid-template-columns: 284px minmax(0, 1fr); grid-template-areas: "controls stage" "controls math"; }
+}
+@media (max-width: 860px) {
+  .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "math" "controls"; gap: 28px; }
+}
+
+/* ---------- Controls ---------- */
+button {
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+button:hover { background: var(--paper); }
+button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+button.on b { color: inherit; }
+button:disabled { opacity: 0.45; cursor: default; }
+button svg { width: 16px; height: 16px; flex: none; }
+#reset { display: inline-flex; align-items: center; gap: 7px; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.xyz-in input {
+  font: inherit;
+  width: 3.7em;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 6px;
+  font-variant-numeric: tabular-nums;
+}
+.vec-box { margin: 0 0 18px; }
+.vec-name { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; }
+.vec-name .len { margin-left: auto; color: var(--ink-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.swatch { width: 16px; height: 4px; border-radius: 2px; align-self: center; flex: none; }
+.swatch.a { background: var(--a); }
+.swatch.b { background: var(--b); }
+.xyz-in { display: flex; gap: 10px; }
+.xyz-in label { display: flex; align-items: center; gap: 5px; }
+.xyz-in i { color: var(--ink-soft); }
+.live-cross {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.toggle { display: flex; align-items: center; gap: 10px; padding: 5px 0; cursor: pointer; }
+.toggle input { width: 18px; height: 18px; margin: 0; accent-color: var(--ink); flex: none; }
+.presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 14px 0 0; }
+.presets span { color: var(--ink-soft); margin-right: 2px; }
+.presets button { font-size: 0.875rem; padding: 4px 10px; }
+fieldset { border: 0; margin: 26px 0 0; padding: 0; min-width: 0; }
+.hint { color: var(--ink-soft); font-size: 0.875rem; margin: 8px 0 0; }
+
+/* ---------- Diagram ---------- */
+.paper { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+#scene { display: block; width: 100%; -webkit-user-select: none; user-select: none; cursor: grab; touch-action: none; }
+#scene.turning { cursor: grabbing; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.toolbar .gap { flex: 1; }
+.toolbar button { font-size: 0.875rem; padding: 4px 10px; min-height: 32px; }
+.toolbar .zoom-btn { min-width: 34px; font-size: 1.125rem; font-weight: 700; line-height: 1; }
+.caption { font-size: 0.875rem; color: var(--ink-soft); margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+
+/* ---------- The working ---------- */
+.math { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+.result, .graph, .wide { grid-column: 1 / -1; }
+.result-value { font-size: 1.75rem; font-weight: 700; line-height: 1.2; margin: 0; font-variant-numeric: tabular-nums; }
+.result-size { margin: 2px 0 0; font-size: 1.125rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.result-meaning { margin: 4px 0 0; color: var(--ink-soft); }
+.calc { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; min-width: 0; }
+.calc h2 { font-size: 0.9375rem; margin-bottom: 10px; }
+.eq { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; row-gap: 6px; font-variant-numeric: tabular-nums; align-items: center; }
+.eq .lhs { text-align: right; white-space: nowrap; }
+.eq.small { font-size: 0.9375rem; }
+.calc .hint:empty { display: none; }
+/* Determinants: numbers between two vertical bars */
+.det {
+  display: inline-grid;
+  grid-template-columns: repeat(3, auto);
+  column-gap: 12px;
+  padding: 0 7px;
+  margin: 0 2px;
+  border-left: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  text-align: center;
+  vertical-align: middle;
+  line-height: 1.35;
+}
+.det.two { grid-template-columns: repeat(2, auto); column-gap: 8px; padding: 0 5px; font-size: 0.875em; }
+.picker { display: inline-flex; gap: 4px; margin-bottom: 10px; }
+.picker button { padding: 3px 12px; font-weight: 700; }
+#sarrus { display: block; width: 100%; max-width: 330px; height: auto; margin-bottom: 6px; overflow: visible; }
+.rules { margin: 0; padding: 0 0 0 1.1em; }
+.rules li { margin: 0 0 6px; }
+/* Part by part: a part of A (row) times a part of B (column) */
+.grid-wrap { overflow-x: auto; margin: 0 0 10px; }
+.xyz-grid { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.xyz-grid th, .xyz-grid td { min-width: 4.4em; height: 3.6em; padding: 3px 5px; text-align: center; border: 1px solid var(--line); }
+.xyz-grid th { background: var(--page); font-size: 1rem; font-weight: 700; }
+.xyz-grid th:first-child { min-width: 3.4em; font-size: 0.875rem; }
+.cell-value { display: block; font-size: 1.125rem; font-weight: 700; line-height: 1.2; }
+.cell-how { display: block; font-size: 0.75rem; color: var(--ink-soft); white-space: nowrap; }
+.xyz-grid td.zero .cell-value { color: var(--ink-soft); font-weight: 400; }
+.collect { margin: 0; font-variant-numeric: tabular-nums; }
+.collect div { margin-bottom: 3px; }
+#cycle { display: block; width: 150px; height: 138px; margin: 0 0 6px; }
+.products { margin: 0; font-variant-numeric: tabular-nums; }
+.products p { margin: 0 0 8px; }
+.products p.group { margin: 0 0 2px; font-size: 0.875rem; color: var(--ink-soft); }
+.products span { display: inline-block; margin-right: 12px; padding: 0 3px; border-radius: 4px; }
+.products span.now { background: var(--ink); color: var(--paper); }
+.cycle-arc { fill: none; stroke: var(--ink-soft); stroke-width: 2.5; }
+.cycle-head { fill: var(--ink-soft); }
+.cycle-arc.on { stroke: var(--c); stroke-width: 4; }
+.cycle-head.on { fill: var(--c); }
+.cycle-label { fill: var(--ink); font-size: 18px; font-weight: 700; text-anchor: middle; }
+.graph { margin: 0; }
+.graph figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin-bottom: 4px; }
+.graph .key { color: var(--ink-soft); font-size: 0.875rem; }
+.graph .paper { cursor: crosshair; touch-action: pan-y; }
+.graph svg { display: block; width: 100%; -webkit-user-select: none; user-select: none; }
+
+/* ---------- How the drawings look (SVG) ---------- */
+svg text { font-family: inherit; }
+.grid-minor { stroke: var(--grid-minor); }
+.grid-major { stroke: var(--grid-major); }
+.axis { stroke: var(--ink-soft); stroke-width: 1.5; }
+.axis-back { stroke: var(--ink-soft); stroke-width: 1; stroke-dasharray: 3 4; opacity: 0.7; }
+.axis-label { fill: var(--ink-soft); font-size: 15px; font-style: italic; font-weight: 700; text-anchor: middle; }
+.halo { paint-order: stroke; stroke: var(--paper); stroke-width: 4px; stroke-linejoin: round; }
+.origin { fill: var(--ink); }
+.vec line { stroke-width: 4; stroke-linecap: round; }
+.vec text { font-size: 18px; font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: var(--paper); stroke-width: 4px; stroke-linejoin: round; }
+.vec.a line { stroke: var(--a); }
+.vec.a polygon, .vec.a text { fill: var(--a); }
+.vec.b line { stroke: var(--b); }
+.vec.b polygon, .vec.b text { fill: var(--b); }
+.vec.c line { stroke: var(--c); stroke-width: 5; }
+.vec.c polygon, .vec.c text { fill: var(--c); }
+.vec.ref line { stroke: var(--ink); stroke-width: 2.5; }
+.vec.ref polygon, .vec.ref text { fill: var(--ink); }
+.vec.ref text { font-size: 16px; }
+.end-on { fill: var(--paper); stroke-width: 2.25; }
+.end-on.a { stroke: var(--a); } .end-on.b { stroke: var(--b); } .end-on.c { stroke: var(--c); } .end-on.ref { stroke: var(--ink); }
+.end-on-mark { stroke-width: 2.25; stroke-linecap: round; }
+.end-on-mark.a { stroke: var(--a); fill: var(--a); } .end-on-mark.b { stroke: var(--b); fill: var(--b); }
+.end-on-mark.c { stroke: var(--c); fill: var(--c); } .end-on-mark.ref { stroke: var(--ink); fill: var(--ink); }
+.par { fill: var(--c); fill-opacity: 0.12; stroke: var(--c); stroke-width: 1.5; stroke-dasharray: 6 4; stroke-linejoin: round; }
+.par-label { fill: var(--c); font-size: 13px; font-weight: 700; text-anchor: middle; }
+.parts { fill: none; stroke-width: 1.75; stroke-dasharray: 5 4; stroke-linejoin: round; }
+.parts.a { stroke: var(--a); }
+.parts.b { stroke: var(--b); }
+.curl { fill: none; stroke: var(--ink); stroke-width: 1.75; }
+.curl-head { fill: var(--ink); }
+.turn { fill: none; stroke: var(--c); stroke-width: 2; }
+.turn-head { fill: var(--c); }
+.arc-label { fill: var(--ink); font-size: 14px; font-weight: 700; text-anchor: middle; }
+.lever { stroke: var(--ink-soft); stroke-width: 12; stroke-linecap: round; opacity: 0.28; }
+.bolt { fill: var(--paper); stroke: var(--ink); stroke-width: 2; }
+.extend { stroke: var(--ink-soft); stroke-width: 1.25; stroke-dasharray: 5 4; }
+.line-of-action { stroke: var(--b); stroke-width: 1.25; stroke-dasharray: 2 5; stroke-linecap: round; }
+.lever-arm { stroke: var(--c); stroke-width: 1.75; stroke-dasharray: 6 4; }
+.lever-label { fill: var(--c); font-size: 13px; font-weight: 700; text-anchor: middle; }
+.right-angle { fill: none; stroke: var(--ink-soft); stroke-width: 1.25; }
+.handle { fill: none; stroke-width: 2; opacity: 0.35; }
+.handle.a { stroke: var(--a); }
+.handle.b { stroke: var(--b); }
+.handle.active { opacity: 0.85; }
+.hit { fill: transparent; cursor: grab; }
+.message { fill: var(--c); font-size: 14px; font-weight: 700; text-anchor: middle; }
+.s-cell { fill: var(--ink); font-size: 15px; text-anchor: middle; font-variant-numeric: tabular-nums; }
+.s-cell.a { fill: var(--a); }
+.s-cell.b { fill: var(--b); }
+.s-cell.unit { font-weight: 700; }
+.s-bar { stroke: var(--ink); stroke-width: 2; }
+.s-plus { stroke: var(--c); stroke-width: 3; stroke-linecap: round; opacity: 0.85; }
+.s-minus { stroke: var(--ink-soft); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 1 6; }
+.s-faint { stroke: var(--grid-major); stroke-width: 2; stroke-linecap: round; }
+
+.g-grid { stroke: var(--grid-minor); }
+.g-zero { stroke: var(--ink-soft); }
+.g-frame { fill: none; stroke: var(--grid-major); }
+.g-tick { fill: var(--ink-soft); font-size: 10.5px; text-anchor: middle; }
+.end { text-anchor: end; }
+.start { text-anchor: start; }
+.g-sin { fill: none; stroke: var(--c); stroke-width: 2.5; stroke-linejoin: round; }
+.g-cos { fill: none; stroke: var(--ink-soft); stroke-width: 1.75; stroke-dasharray: 5 4; }
+.g-guide { stroke: var(--ink-soft); stroke-dasharray: 2 3; }
+.g-dot { fill: var(--c); stroke: var(--paper); stroke-width: 2; }
+.g-dot.cos { fill: var(--ink-soft); }
+</style>
+</head>
+<body data-mode="explore">
+<div class="app">
+  <header>
+    <h1>Vector cross product explorer</h1>
+    <div class="activity">
+      <div class="modes" role="radiogroup" aria-label="Activity">
+        <label><input type="radio" name="mode" value="explore" checked><span>Two vectors</span></label>
+        <label><input type="radio" name="mode" value="unit"><span>Unit vectors</span></label>
+        <label><input type="radio" name="mode" value="torque"><span>Torque</span></label>
+      </div>
+      <button type="button" id="reset" title="Put every setting back the way it started">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8.5 3A5.5 5.5 0 1 1 3.2 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10.6 0.9 8.4 3 10.6 5.1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Reset
+      </button>
+    </div>
+    <p class="explore-only">The cross product <b class="a-text">A</b>×<b class="b-text">B</b> is a third vector, at right angles to both. Its magnitude is <i>AB</i> sin θ, the area of the parallelogram the two vectors make, and its direction comes from the right-hand rule. Drag an arrow tip to change a vector, or drag anywhere else to turn the view.</p>
+    <p class="unit-only">The unit vectors î, ĵ and k̂ cross in a cycle: î×ĵ = k̂, ĵ×k̂ = î and k̂×î = ĵ. Going the other way round gives a minus sign, and a unit vector crossed with itself gives 0. Multiplying out <b class="a-text">A</b>×<b class="b-text">B</b> part by part with these rules gives the determinant formula.</p>
+    <p class="torque-only">A force <b class="b-text">F</b> pushes on a wrench at the point <b class="a-text">r</b> from the bolt. The torque <b class="c-text">τ</b> = <b class="a-text">r</b>×<b class="b-text">F</b> points along the axis the wrench turns about: curl your right hand’s fingers the way it turns, and your thumb points along τ.</p>
+  </header>
+
+  <main class="layout">
+    <!-- The two vectors and what to show -->
+    <section class="controls" aria-labelledby="controls-title">
+      <h2 id="controls-title"><span class="not-torque">Vectors</span><span class="torque-only">Position and force</span></h2>
+
+      <div class="vec-box">
+        <p class="vec-name"><span class="swatch a" aria-hidden="true"></span>
+          <span class="not-torque">Vector <b class="a-text">A</b></span>
+          <span class="torque-only">Position <b class="a-text">r</b> (m)</span>
+          <span class="len" id="lenA"></span></p>
+        <div class="xyz-in">
+          <label><i>x</i><input id="ax" type="number" step="1" min="-6" max="6" inputmode="decimal" aria-label="A, x component"></label>
+          <label><i>y</i><input id="ay" type="number" step="1" min="-6" max="6" inputmode="decimal" aria-label="A, y component"></label>
+          <label><i>z</i><input id="az" type="number" step="1" min="-6" max="6" inputmode="decimal" aria-label="A, z component"></label>
+        </div>
+      </div>
+
+      <div class="vec-box">
+        <p class="vec-name"><span class="swatch b" aria-hidden="true"></span>
+          <span class="not-torque">Vector <b class="b-text">B</b></span>
+          <span class="torque-only">Force <b class="b-text">F</b> (N)</span>
+          <span class="len" id="lenB"></span></p>
+        <div class="xyz-in">
+          <label><i>x</i><input id="bx" type="number" step="1" min="-6" max="6" inputmode="decimal" aria-label="B, x component"></label>
+          <label><i>y</i><input id="by" type="number" step="1" min="-6" max="6" inputmode="decimal" aria-label="B, y component"></label>
+          <label><i>z</i><input id="bz" type="number" step="1" min="-6" max="6" inputmode="decimal" aria-label="B, z component"></label>
+        </div>
+      </div>
+
+      <p class="live-cross unit-only" id="liveCross"></p>
+
+      <label class="toggle"><input type="checkbox" id="snap" checked><span>Snap tips to whole numbers</span></label>
+
+      <div class="presets explore-only" role="group" aria-label="Try">
+        <span>Try</span>
+        <button type="button" data-a="2,0,0" data-b="1,2,0">On the floor</button>
+        <button type="button" data-a="2,0,0" data-b="0,3,0">At right angles</button>
+        <button type="button" data-a="2,1,0" data-b="4,2,0">Parallel</button>
+        <button type="button" data-a="2,1,0" data-b="0,2,1">In 3D</button>
+        <button type="button" id="swap">Swap <b class="a-text">A</b> and <b class="b-text">B</b></button>
+      </div>
+      <div class="presets unit-only" role="group" aria-label="Try">
+        <span>Try</span>
+        <button type="button" id="tryOwn" data-try="own" title="Back to your own A and B"><b class="a-text">A</b>×<b class="b-text">B</b></button>
+        <button type="button" data-try="ij" data-a="1,0,0" data-b="0,1,0">î×ĵ</button>
+        <button type="button" data-try="jk" data-a="0,1,0" data-b="0,0,1">ĵ×k̂</button>
+        <button type="button" data-try="ki" data-a="0,0,1" data-b="1,0,0">k̂×î</button>
+        <button type="button" data-try="ji" data-a="0,1,0" data-b="1,0,0">ĵ×î</button>
+        <button type="button" data-try="ii" data-a="1,0,0" data-b="1,0,0">î×î</button>
+      </div>
+      <div class="presets torque-only" role="group" aria-label="Try">
+        <span>Try</span>
+        <button type="button" data-a="0,3,0" data-b="-2,0,0">Push at 90°</button>
+        <button type="button" data-a="1,3,0" data-b="-1,1,0">Push at an angle</button>
+        <button type="button" data-a="0,3,0" data-b="0,2,0">Push along the handle</button>
+        <button type="button" data-a="0,3,0" data-b="2,0,0">Push the other way</button>
+      </div>
+
+      <fieldset>
+        <legend>Show</legend>
+        <label class="toggle not-torque"><input type="checkbox" id="showCurl" checked><span>Right-hand rule and θ</span></label>
+        <label class="toggle explore-only"><input type="checkbox" id="showPar" checked><span>Parallelogram (its area is |<b class="a-text">A</b>×<b class="b-text">B</b>|)</span></label>
+        <label class="toggle explore-only"><input type="checkbox" id="showComp"><span>Components, as paths along <i>x</i>, <i>y</i>, <i>z</i></span></label>
+        <label class="toggle unit-only"><input type="checkbox" id="showIJK" checked><span>Unit vectors î, ĵ, k̂</span></label>
+        <label class="toggle unit-only"><input type="checkbox" id="showParts" checked><span>Parts along <i>x</i>, <i>y</i>, <i>z</i></span></label>
+        <label class="toggle torque-only"><input type="checkbox" id="showPhi" checked><span>Angle φ between <b class="a-text">r</b> and <b class="b-text">F</b></span></label>
+        <label class="toggle torque-only"><input type="checkbox" id="showLever" checked><span>Line of action and lever arm</span></label>
+        <label class="toggle torque-only"><input type="checkbox" id="showTurn" checked><span>Turning direction</span></label>
+      </fieldset>
+    </section>
+
+    <!-- The 3D diagram -->
+    <section class="stage" aria-label="Diagram">
+      <div class="paper" id="sceneBox">
+        <svg id="scene" role="img" aria-label="A 3D diagram of the vectors and their cross product, with x, y and z axes">
+          <g id="layer"></g>
+        </svg>
+      </div>
+      <div class="toolbar" role="group" aria-label="View">
+        <button type="button" data-view="zUp" title="z points up, like the torque picture">z up</button>
+        <button type="button" data-view="zToward" title="x to the right, y up, z toward you">z toward you</button>
+        <span class="gap"></span>
+        <button type="button" class="zoom-btn" id="zoomOut" aria-label="Zoom out" title="Zoom out">−</button>
+        <button type="button" class="zoom-btn" id="zoomIn" aria-label="Zoom in" title="Zoom in">+</button>
+        <button type="button" id="zoomFit" title="Frame the vectors again">Fit</button>
+      </div>
+      <p class="caption"><span id="gridNote">Each floor square is 1 unit.</span><span>Drag a tip to move it. Drag anywhere else to turn the view. Zoom with + and −, Ctrl + scroll, or a pinch.</span></p>
+    </section>
+
+    <!-- The answer, worked out -->
+    <section class="math" aria-label="The cross product, worked out">
+      <div class="result">
+        <p class="result-value" id="resultValue"></p>
+        <p class="result-size" id="resultSize"></p>
+        <p class="result-meaning" id="resultMeaning"></p>
+      </div>
+
+      <div class="calc wide not-unit">
+        <h2>From the determinant</h2>
+        <div class="eq small" id="detWork"></div>
+      </div>
+
+      <div class="calc wide explore-only">
+        <h2>The diagonal trick</h2>
+        <div class="picker" role="group" aria-label="Which part">
+          <button type="button" data-part="x" class="on">î</button>
+          <button type="button" data-part="y">ĵ</button>
+          <button type="button" data-part="z">k̂</button>
+        </div>
+        <svg id="sarrus" viewBox="0 0 330 118" aria-hidden="true"></svg>
+        <p class="eq-line" id="sarrusLine"></p>
+        <p class="hint">Copy the first two columns to the right. For each unit vector, multiply down the solid diagonal and subtract the product down the dotted one.</p>
+      </div>
+
+      <div class="calc wide unit-only">
+        <h2><b class="a-text">A</b>×<b class="b-text">B</b>, part by part</h2>
+        <div class="grid-wrap"><table class="xyz-grid">
+          <thead><tr><th scope="col"><b class="a-text">A</b>×<b class="b-text">B</b></th><th scope="col" id="colX"></th><th scope="col" id="colY"></th><th scope="col" id="colZ"></th></tr></thead>
+          <tbody>
+            <tr><th scope="row" id="rowX"></th><td id="xx" class="zero"></td><td id="xy"></td><td id="xz"></td></tr>
+            <tr><th scope="row" id="rowY"></th><td id="yx"></td><td id="yy" class="zero"></td><td id="yz"></td></tr>
+            <tr><th scope="row" id="rowZ"></th><td id="zx"></td><td id="zy"></td><td id="zz" class="zero"></td></tr>
+          </tbody>
+        </table></div>
+        <div class="collect" id="collect"></div>
+        <p class="hint">Each box is a part of <b class="a-text">A</b> crossed with a part of <b class="b-text">B</b>. The diagonal boxes are 0, because a unit vector crossed with itself is 0. Collecting the î, ĵ and k̂ boxes gives the same answer as the determinant.</p>
+      </div>
+
+      <div class="calc wide unit-only">
+        <h2>Going round î → ĵ → k̂</h2>
+        <svg id="cycle" viewBox="0 0 150 138" aria-hidden="true"></svg>
+        <div class="products" id="products">
+          <p class="group">Following the arrows</p>
+          <p><span data-pair="ij">î×ĵ = k̂</span><span data-pair="jk">ĵ×k̂ = î</span><span data-pair="ki">k̂×î = ĵ</span></p>
+          <p class="group">Against the arrows: a minus sign</p>
+          <p><span data-pair="ji">ĵ×î = −k̂</span><span data-pair="kj">k̂×ĵ = −î</span><span data-pair="ik">î×k̂ = −ĵ</span></p>
+          <p class="group">The same one twice: zero</p>
+          <p><span data-pair="ii">î×î = 0</span><span data-pair="jj">ĵ×ĵ = 0</span><span data-pair="kk">k̂×k̂ = 0</span></p>
+        </div>
+      </div>
+
+      <div class="calc wide not-unit">
+        <h2><span class="explore-only">Magnitude from the angle</span><span class="torque-only">Magnitude from the angle and the lever arm</span></h2>
+        <div class="eq small" id="sizeWork"></div>
+        <p class="hint" id="sizeNote"></p>
+      </div>
+
+      <div class="calc wide explore-only">
+        <h2>Rules, checked with your vectors</h2>
+        <ul class="rules" id="rules"></ul>
+      </div>
+
+      <figure class="graph">
+        <figcaption><span>How <span class="not-torque">|<b class="a-text">A</b>×<b class="b-text">B</b>|</span><span class="torque-only"><b class="c-text">τ</b></span> changes with the angle</span>
+          <span class="key"><b class="c-text">——</b> <span class="not-torque">|A×B| = <i>AB</i> sin θ</span><span class="torque-only">τ = <i>rF</i> sin φ</span><span class="not-torque">&nbsp;&nbsp;- - - <b>A</b>·<b>B</b> = <i>AB</i> cos θ, for comparison</span></span></figcaption>
+        <div class="paper"><svg id="graph" aria-hidden="true"></svg></div>
+        <p class="hint">Click or drag on the graph to set the angle. The lengths stay the same.</p>
+      </figure>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ===================================================================
+     1. HELPERS
+     =================================================================== */
+  const $ = (id) => document.getElementById(id);
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const DEG = Math.PI / 180;
+  const EPS = 1e-9;
+
+  // Make an SVG element with some attributes and add it to a parent.
+  function add(parent, tag, attrs = {}, text) {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+    if (text !== undefined) el.textContent = text;
+    parent.appendChild(el);
+    return el;
+  }
+
+  // Numbers for people: a true minus sign, and never "−0".
+  function fixed(n, digits) {
+    let s = n.toFixed(digits);
+    if (Number(s) === 0) s = (0).toFixed(digits);
+    return s.replace("-", "\u2212");
+  }
+  const fmt1 = (n) => fixed(n, 1);
+  const fmt2 = (n) => fixed(n, 2);
+  const fmt3 = (n) => fixed(n, 3);
+  const fmtNum = (n) => fixed(n, 2).replace(/\.?0+$/, "");   // 10, 2.5, 1.41
+  const inputText = (n) => String(Math.round(n * 100) / 100);  // number boxes need a plain "-"
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  /* ===================================================================
+     2. VECTOR MATHS (in 3D)
+     =================================================================== */
+  const vec = (x, y, z) => ({ x, y, z });
+  const ZERO = vec(0, 0, 0);
+  const plus3 = (p, q) => vec(p.x + q.x, p.y + q.y, p.z + q.z);
+  const minus3 = (p, q) => vec(p.x - q.x, p.y - q.y, p.z - q.z);
+  const times3 = (p, k) => vec(p.x * k, p.y * k, p.z * k);
+  const dot3 = (p, q) => p.x * q.x + p.y * q.y + p.z * q.z;
+  // The cross product, written out exactly as on the slide:
+  // (AyBz − AzBy) î + (AzBx − AxBz) ĵ + (AxBy − AyBx) k̂
+  const cross3 = (p, q) => vec(p.y * q.z - p.z * q.y, p.z * q.x - p.x * q.z, p.x * q.y - p.y * q.x);
+  const len3 = (p) => Math.hypot(p.x, p.y, p.z);
+  const unit3 = (p) => { const l = len3(p); return l < EPS ? ZERO : times3(p, 1 / l); };
+  // The angle between two vectors, 0° to 180°.
+  const angleBetween3 = (p, q) => Math.atan2(len3(cross3(p, q)), dot3(p, q)) / DEG;
+  // Some unit vector at right angles to p.
+  const perpendicularTo = (p) => unit3(Math.abs(p.x) < 0.9 * len3(p) ? cross3(p, vec(1, 0, 0)) : cross3(p, vec(0, 1, 0)));
+
+  /* ===================================================================
+     3. THE THREE ACTIVITIES
+     Two vectors: A, B and A×B.  Unit vectors: the same, multiplied out
+     with î, ĵ, k̂.  Torque: A becomes r, B becomes F (drawn from the end
+     of r), and A×B becomes τ. The maths is exactly the same.
+     =================================================================== */
+  const DEFAULTS = {
+    explore: { A: vec(2, 0, 0), B: vec(1, 2, 0) },
+    unit: { A: vec(2, 1, 0), B: vec(0, 1, 1) },
+    torque: { A: vec(1, 3, 0), B: vec(-1, 1, 0) },
+  };
+  const fresh = (m) => ({ A: { ...DEFAULTS[m].A }, B: { ...DEFAULTS[m].B } });
+  const NAMES = {
+    explore: { a: "A", b: "B", c: "A×B" },
+    unit: { a: "A", b: "B", c: "A×B" },
+    torque: { a: "r", b: "F", c: "τ" },
+  };
+  const bold = (cls, s) => `<b class="${cls}">${s}</b>`;
+  const inA = (s) => `<span class="a-text">${s}</span>`;
+  const inB = (s) => `<span class="b-text">${s}</span>`;
+
+  /* ===================================================================
+     4. STATE
+     =================================================================== */
+  let mode = "explore";
+  const vectors = { explore: fresh("explore"), unit: fresh("unit"), torque: fresh("torque") };
+  const V = () => vectors[mode];
+  let dragging = null;          // "A" or "B" while a tip is dragged
+  let dragDepth = 0;            // how far toward you the dragged tip was when the drag began
+  let zoom = 1;                 // 1 = framed to fit
+  let frame = { target: ZERO, radius: 6 };   // what the view centres on, and how much it fits
+  let view = { W: 600, H: 480, s: 40, tx: 0, ty: 0 };
+  let savedOwn = null;          // Unit vectors: your own A and B while a Try button is in use
+  let sarrusPart = "x";
+
+  /* ===================================================================
+     5. THE CAMERA
+     A view is a rotation. Its three rows are the screen's right, up and
+     toward-you directions, written in world coordinates. To draw a point,
+     take its dot product with each row.
+     =================================================================== */
+  const IDENTITY = [vec(1, 0, 0), vec(0, 1, 0), vec(0, 0, 1)];
+  // z up, turned by an azimuth and tilted by an elevation (like the torque picture).
+  function viewZUp(azDeg, elDeg) {
+    const a = azDeg * DEG, e = elDeg * DEG;
+    return [
+      vec(-Math.sin(a), Math.cos(a), 0),
+      vec(-Math.sin(e) * Math.cos(a), -Math.sin(e) * Math.sin(a), Math.cos(e)),
+      vec(Math.cos(e) * Math.cos(a), Math.cos(e) * Math.sin(a), Math.sin(e)),
+    ];
+  }
+  // Turn the view about the screen's up axis (yaw) or its right axis (pitch).
+  function yaw(R, angle) {
+    const c = Math.cos(angle), s = Math.sin(angle);
+    return tidy([plus3(times3(R[0], c), times3(R[2], s)), R[1], minus3(times3(R[2], c), times3(R[0], s))]);
+  }
+  function pitch(R, angle) {
+    const c = Math.cos(angle), s = Math.sin(angle);
+    return tidy([R[0], minus3(times3(R[1], c), times3(R[2], s)), plus3(times3(R[1], s), times3(R[2], c))]);
+  }
+  // Keep the three rows exactly at right angles, and right-handed.
+  function tidy(R) {
+    const right = unit3(R[0]);
+    const up = unit3(minus3(R[1], times3(right, dot3(R[1], right))));
+    return [right, up, cross3(right, up)];
+  }
+  const VIEWS = {
+    zUp: () => viewZUp(30, 24),                                   // x toward you, y right, z up
+    zToward: () => pitch(yaw(IDENTITY, -25 * DEG), 20 * DEG),     // x right, y up, z toward you (slide 1)
+  };
+  const DEFAULT_VIEW = { explore: "zUp", unit: "zToward", torque: "zUp" };
+  let camera = VIEWS.zUp();
+
+  /* ===================================================================
+     6. THE 3D DIAGRAM
+     The SVG is cleared and redrawn whenever anything changes.
+     =================================================================== */
+  function drawScene() {
+    const svg = $("scene"), layer = $("layer");
+    const W = $("sceneBox").clientWidth || 600, narrow = W < 500;
+    const H = Math.round(Math.min(620, Math.max(320, W * (narrow ? 1 : 0.82))));
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("height", H);
+    layer.replaceChildren();
+    const on = (id) => $(id).checked;
+    const torque = mode === "torque", unit = mode === "unit";
+    const { A, B } = V();
+    const C = cross3(A, B);
+    const names = NAMES[mode];
+    // τ is in N·m, not m or N, so it can be drawn at any scale. Half length keeps the wrench readable.
+    const Cdraw = torque ? times3(C, 0.5) : C;
+
+    // What the view has to fit, and the point it centres on (not while dragging,
+    // so the picture doesn't slide away under the pointer).
+    if (!dragging) {
+      const pts = [ZERO, A, Cdraw, torque ? plus3(A, B) : B];
+      if (mode === "explore" && on("showPar")) pts.push(plus3(A, B));
+      if (unit && on("showIJK")) pts.push(vec(1, 0, 0), vec(0, 1, 0), vec(0, 0, 1));
+      const lo = pts.reduce((m, p) => vec(Math.min(m.x, p.x), Math.min(m.y, p.y), Math.min(m.z, p.z)));
+      const hi = pts.reduce((m, p) => vec(Math.max(m.x, p.x), Math.max(m.y, p.y), Math.max(m.z, p.z)));
+      const target = times3(plus3(lo, hi), 0.5);
+      frame = { target, radius: Math.max(2.5, ...pts.map((p) => len3(minus3(p, target)))) * 1.18 };
+    }
+    const s = ((Math.min(W, H) / 2 - 26) / frame.radius) * zoom;
+    const tx = dot3(camera[0], frame.target), ty = dot3(camera[1], frame.target);
+    view = { W, H, s, tx, ty };
+    const P = (p) => ({ x: W / 2 + (dot3(camera[0], p) - tx) * s, y: H / 2 - (dot3(camera[1], p) - ty) * s, d: dot3(camera[2], p) });
+
+    // The floor: the xy-plane, as graph paper.
+    const reach = Math.max(4, ...[A, B, Cdraw, plus3(A, B)].map((p) => Math.max(Math.abs(p.x), Math.abs(p.y))));
+    const N = Math.min(24, Math.ceil(reach) + 1);
+    const step = s >= 12 ? 1 : s >= 5 ? 2 : 5;
+    for (let v = -Math.floor(N / step) * step; v <= N; v += step) {
+      const major = v % 5 === 0 ? "grid-major" : "grid-minor";
+      const a1 = P(vec(v, -N, 0)), a2 = P(vec(v, N, 0)), b1 = P(vec(-N, v, 0)), b2 = P(vec(N, v, 0));
+      add(layer, "line", { x1: a1.x, y1: a1.y, x2: a2.x, y2: a2.y, class: major });
+      add(layer, "line", { x1: b1.x, y1: b1.y, x2: b2.x, y2: b2.y, class: major });
+    }
+
+    // Axes: solid on the positive side, dashed behind, each running to near the edge.
+    const o = P(ZERO);
+    for (const [e, name] of [[vec(1, 0, 0), "x"], [vec(0, 1, 0), "y"], [vec(0, 0, 1), "z"]]) {
+      const u = P(e), dx = u.x - o.x, dy = u.y - o.y, perUnit = Math.hypot(dx, dy);
+      const room = (t) => o.x + dx * t > 18 && o.x + dx * t < W - 18 && o.y + dy * t > 18 && o.y + dy * t < H - 18;
+      let tPos = Math.min(N + 1, 60), tNeg = Math.min(N + 1, 60);
+      if (perUnit > 1e-6) {
+        while (tPos > 0.5 && !room(tPos)) tPos -= 0.25;
+        while (tNeg > 0.5 && !room(-tNeg)) tNeg -= 0.25;
+      }
+      add(layer, "line", { x1: o.x, y1: o.y, x2: o.x - dx * tNeg, y2: o.y - dy * tNeg, class: "axis-back" });
+      add(layer, "line", { x1: o.x, y1: o.y, x2: o.x + dx * tPos, y2: o.y + dy * tPos, class: "axis" });
+      if (perUnit > 3) {
+        const ux = dx / perUnit, uy = dy / perUnit;
+        add(layer, "text", { x: o.x + dx * tPos - ux * 6 + uy * 12, y: o.y + dy * tPos - uy * 6 - ux * 12 + 5, class: "axis-label halo" }, name);
+      } else {
+        add(layer, "text", { x: o.x + 14, y: o.y - 10, class: "axis-label halo" }, name);   // pointing at you
+      }
+    }
+
+    // Unit vectors: î, ĵ and k̂ themselves, and each vector's parts along x, y, z.
+    if (unit && on("showIJK")) {
+      for (const [e, label] of [[vec(1, 0, 0), "î"], [vec(0, 1, 0), "ĵ"], [vec(0, 0, 1), "k̂"]]) arrow3(layer, P, ZERO, e, "ref", label);
+    }
+    if ((unit && on("showParts")) || (!unit && !torque && on("showComp"))) {
+      for (const [p, key] of [[A, "a"], [B, "b"]]) {
+        const pts = [ZERO, vec(p.x, 0, 0), vec(p.x, p.y, 0), p].map(P);
+        add(layer, "path", { d: pts.map((q, i) => `${i ? "L" : "M"}${q.x.toFixed(1)} ${q.y.toFixed(1)}`).join(" "), class: `parts ${key}` });
+      }
+    }
+
+    // The parallelogram A and B make. Its area is |A×B|.
+    if (mode === "explore" && on("showPar") && len3(C) > EPS) {
+      const corners = [ZERO, A, plus3(A, B), B].map(P);
+      add(layer, "polygon", { points: corners.map((q) => `${q.x},${q.y}`).join(" "), class: "par" });
+      const mid = P(times3(plus3(A, B), 0.5));
+      add(layer, "text", { x: mid.x, y: mid.y + 4, class: "par-label halo" }, `area ${fmt2(len3(C))}`);
+    }
+
+    // Torque: the wrench (from the bolt to where F pushes), the line of action,
+    // the lever arm, and the angle φ at the end of r.
+    if (torque) {
+      const p0 = P(ZERO), pr = P(A);
+      add(layer, "line", { x1: p0.x, y1: p0.y, x2: pr.x, y2: pr.y, class: "lever" });
+      const lF = len3(B), lr = len3(A);
+      if (on("showLever") && lF > EPS) {
+        const f = unit3(B), far = frame.radius * 3;
+        const l1 = P(minus3(A, times3(f, far))), l2 = P(plus3(A, times3(f, far)));
+        add(layer, "line", { x1: l1.x, y1: l1.y, x2: l2.x, y2: l2.y, class: "line-of-action" });
+        // The lever arm: from the bolt straight to the line of action.
+        const foot = minus3(A, times3(f, dot3(A, f)));
+        if (len3(foot) > 0.05) {
+          const pf = P(foot);
+          add(layer, "line", { x1: p0.x, y1: p0.y, x2: pf.x, y2: pf.y, class: "lever-arm" });
+          rightAngle3(layer, P, foot, unit3(times3(foot, -1)), f);
+        }
+      }
+      if (on("showPhi") && lF > EPS && lr > EPS) {
+        // Extend r past its tip, and mark φ from that extension round to F.
+        const rh = unit3(A), ext = P(plus3(A, times3(rh, Math.min(lF, 2.2))));
+        add(layer, "line", { x1: pr.x, y1: pr.y, x2: ext.x, y2: ext.y, class: "extend" });
+        arc3(layer, P, A, A, B, Math.min(0.9, 0.35 * Math.min(lr, lF)), "curl", "φ", [A, plus3(A, B)]);
+      }
+      add(layer, "circle", { cx: p0.x, cy: p0.y, r: 7, class: "bolt" });
+      if (on("showTurn") && len3(C) > EPS) turnAround(layer, P, unit3(C), times3(Cdraw, 0.45), Math.min(0.9, 0.3 * Math.max(lr, 1.5)));
+    }
+
+    // Right-hand rule: curl from A toward B (the fingers); A×B is the thumb.
+    if (!torque && on("showCurl") && len3(A) > EPS && len3(B) > EPS && len3(C) > EPS) {
+      arc3(layer, P, ZERO, A, B, Math.max(0.6, Math.min(1.4, 0.45 * Math.min(len3(A), len3(B)))), "curl", "θ", [A, B, C]);
+    }
+
+    // The arrows, farthest first, so nearer ones are drawn on top.
+    const arrows = torque
+      ? [[ZERO, A, "a", names.a], [A, plus3(A, B), "b", names.b], [ZERO, Cdraw, "c", names.c]]
+      : [[ZERO, A, "a", names.a], [ZERO, B, "b", names.b], [ZERO, C, "c", names.c]];
+    const drawn = arrows.filter(([from, to]) => len3(minus3(to, from)) > EPS);
+    drawn.sort((p, q) => P(times3(plus3(p[0], p[1]), 0.5)).d - P(times3(plus3(q[0], q[1]), 0.5)).d);
+    for (const [from, to, key, label] of drawn) arrow3(layer, P, from, to, key, label);
+    if (len3(C) < EPS) add(layer, "text", { x: o.x, y: o.y - 16, class: "message halo" }, `${names.c} = 0`);
+    add(layer, "circle", { cx: o.x, cy: o.y, r: 3.5, class: "origin" });
+
+    // Rings where you can grab a tip, and generous invisible grab areas.
+    const tips = torque ? [["A", A, "a"], ["B", plus3(A, B), "b"]] : [["A", A, "a"], ["B", B, "b"]];
+    for (const [key, p, cls] of tips) {
+      const q = P(p);
+      add(layer, "circle", { cx: q.x, cy: q.y, r: 13, class: `handle ${cls}${dragging === key ? " active" : ""}` });
+    }
+    for (const [key, p] of tips) {
+      const q = P(p);
+      const hit = add(layer, "circle", { cx: q.x, cy: q.y, r: 22, class: "hit", "data-handle": key });
+      add(hit, "title", {}, `Drag to change ${key === "A" ? names.a : names.b}`);
+    }
+
+    $("gridNote").textContent = torque
+      ? `Each floor square is ${step} m for r and ${step} N for F. The τ arrow is drawn at half length, ${2 * step} N·m per square.`
+      : `Each floor square is ${step} ${step > 1 ? "units" : "unit"}.`;
+    $("zoomFit").disabled = zoom === 1;
+  }
+
+  /* ===================================================================
+     7. LITTLE DRAWINGS
+     =================================================================== */
+
+  // An arrow from one 3D point to another. If it points almost straight at you
+  // (or away), it is drawn end-on instead: ⊙ toward you, ⊗ away from you.
+  function arrow3(layer, P, from, to, key, label) {
+    const a = P(from), b = P(to);
+    const dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy);
+    const g = add(layer, "g", { class: `vec ${key}` });
+    if (length < 8) {
+      add(g, "circle", { cx: b.x, cy: b.y, r: 9, class: `end-on ${key}` });
+      if (b.d > a.d) add(g, "circle", { cx: b.x, cy: b.y, r: 2.6, class: `end-on-mark ${key}` });
+      else add(g, "path", { d: `M ${b.x - 5} ${b.y - 5} L ${b.x + 5} ${b.y + 5} M ${b.x + 5} ${b.y - 5} L ${b.x - 5} ${b.y + 5}`, class: `end-on-mark ${key}` });
+      add(g, "text", { x: b.x + 18, y: b.y - 12 }, label);
+      return;
+    }
+    const ux = dx / length, uy = dy / length, head = Math.min(15, length * 0.5);
+    const baseX = b.x - ux * head, baseY = b.y - uy * head;
+    add(g, "line", { x1: a.x, y1: a.y, x2: baseX + ux, y2: baseY + uy });
+    add(g, "polygon", {
+      points: [[b.x, b.y], [baseX - uy * head * 0.45, baseY + ux * head * 0.45], [baseX + uy * head * 0.45, baseY - ux * head * 0.45]]
+        .map((pt) => pt.join(",")).join(" "),
+    });
+    add(g, "text", { x: b.x + ux * 22, y: b.y + uy * 22 + 6 }, label);
+  }
+
+  // An arc at `at`, from direction u round to direction v (the short way),
+  // with an arrowhead at the v end and a label placed where it can be read.
+  function arc3(layer, P, at, u, v, radius, cls, text, avoid) {
+    const uh = unit3(u);
+    let n = minus3(v, times3(uh, dot3(v, uh)));
+    if (len3(n) < 1e-6) return;
+    n = unit3(n);
+    const theta = angleBetween3(u, v) * DEG;
+    const pts = [];
+    for (let i = 0; i <= 36; i++) {
+      const t = (theta * i) / 36;
+      pts.push(P(plus3(at, times3(plus3(times3(uh, Math.cos(t)), times3(n, Math.sin(t))), radius))));
+    }
+    add(layer, "path", { d: pts.map((q, i) => `${i ? "L" : "M"}${q.x.toFixed(1)} ${q.y.toFixed(1)}`).join(" "), class: cls });
+    arrowHead(layer, pts[pts.length - 2], pts[pts.length - 1], `${cls}-head`, 9);
+    // The label: just past the middle of the arc, moved out until it clears the arrows.
+    const mid = plus3(times3(uh, Math.cos(theta / 2)), times3(n, Math.sin(theta / 2)));
+    const label = add(layer, "text", { x: 0, y: 0, class: "arc-label halo" }, text);
+    const spots = [];
+    for (let k = 1.35; k <= 3.2; k += 0.15) spots.push(P(plus3(at, times3(mid, radius * k))));
+    const clear = () => {
+      const bb = label.getBBox(), m = 3;
+      const box = { x: bb.x - m, y: bb.y - m, width: bb.width + 2 * m, height: bb.height + 2 * m };
+      const segs = avoid.map((p) => [P(at), P(p)]).concat(avoid.map((p) => [P(ZERO), P(p)]));
+      return segs.every(([a, b]) => !segmentHitsBox(a.x, a.y, b.x, b.y, box));
+    };
+    const spot = spots.find((q) => { label.setAttribute("x", q.x); label.setAttribute("y", q.y + 5); return clear(); }) ?? spots[0];
+    label.setAttribute("x", spot.x);
+    label.setAttribute("y", spot.y + 5);
+  }
+
+  // A curling arrow round an axis, centred on a point of it: the way something
+  // would turn (right-hand rule: thumb along the axis, fingers curl this way).
+  function turnAround(layer, P, axis, center, radius) {
+    const u = perpendicularTo(axis), w = cross3(axis, u);
+    const pts = [];
+    for (let i = 0; i <= 40; i++) {
+      const t = (5.2 * i) / 40;
+      pts.push(P(plus3(center, times3(plus3(times3(u, Math.cos(t)), times3(w, Math.sin(t))), radius))));
+    }
+    add(layer, "path", { d: pts.map((q, i) => `${i ? "L" : "M"}${q.x.toFixed(1)} ${q.y.toFixed(1)}`).join(" "), class: "turn" });
+    arrowHead(layer, pts[pts.length - 2], pts[pts.length - 1], "turn-head", 10);
+  }
+
+  function arrowHead(layer, from, to, cls, size) {
+    const dx = to.x - from.x, dy = to.y - from.y, l = Math.hypot(dx, dy);
+    if (l < 1e-6) return;
+    const ux = dx / l, uy = dy / l, bx = to.x - ux * size, by = to.y - uy * size;
+    add(layer, "polygon", { points: `${to.x},${to.y} ${bx - uy * size * 0.5},${by + ux * size * 0.5} ${bx + uy * size * 0.5},${by - ux * size * 0.5}`, class: cls });
+  }
+
+  // A small square marking a right angle at `at`, between directions d1 and d2.
+  function rightAngle3(layer, P, at, d1, d2) {
+    const k = 0.28 / Math.max(1, zoom * 0.6);
+    const q = [plus3(at, times3(d1, k)), plus3(plus3(at, times3(d1, k)), times3(d2, k)), plus3(at, times3(d2, k))].map(P);
+    add(layer, "path", { d: `M ${q[0].x} ${q[0].y} L ${q[1].x} ${q[1].y} L ${q[2].x} ${q[2].y}`, class: "right-angle" });
+  }
+
+  // Does the line from (x1, y1) to (x2, y2) pass through the box? (Liang–Barsky clipping.)
+  function segmentHitsBox(x1, y1, x2, y2, box) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const p = [-dx, dx, -dy, dy];
+    const q = [x1 - box.x, box.x + box.width - x1, y1 - box.y, box.y + box.height - y1];
+    let t0 = 0, t1 = 1;
+    for (let i = 0; i < 4; i++) {
+      if (Math.abs(p[i]) < 1e-12) {
+        if (q[i] < 0) return false;
+      } else {
+        const t = q[i] / p[i];
+        if (p[i] < 0) { if (t > t1) return false; t0 = Math.max(t0, t); }
+        else { if (t < t0) return false; t1 = Math.min(t1, t); }
+      }
+    }
+    return true;
+  }
+
+  // The î → ĵ → k̂ circle from the slides, drawn once.
+  function drawCycle() {
+    const svg = $("cycle"), cx = 75, cy = 72, r = 50;
+    const at = (deg, rad = r) => [cx + rad * Math.cos(deg * DEG), cy - rad * Math.sin(deg * DEG)];
+    const spots = { j: 90, k: 210, i: 330 };
+    for (const [key, a1, a2] of [["ij", 330 + 15, 450 - 15], ["jk", 90 + 15, 210 - 15], ["ki", 210 + 15, 330 - 15]]) {
+      const [x1, y1] = at(a1), [x2, y2] = at(a2);
+      add(svg, "path", { d: `M ${x1} ${y1} A ${r} ${r} 0 0 0 ${x2} ${y2}`, class: "cycle-arc", "data-arc": key });
+      // Arrowhead pointing round the circle the same way (counterclockwise).
+      const t = a2 * DEG, ux = -Math.sin(t), uy = -Math.cos(t), sz = 9;
+      const bx = x2 - ux * sz, by = y2 - uy * sz;
+      add(svg, "polygon", { points: `${x2},${y2} ${bx - uy * sz * 0.55},${by + ux * sz * 0.55} ${bx + uy * sz * 0.55},${by - ux * sz * 0.55}`, class: "cycle-head", "data-arc": key });
+    }
+    for (const [key, label] of [["i", "î"], ["j", "ĵ"], ["k", "k̂"]]) {
+      const [x, y] = at(spots[key]);
+      add(svg, "text", { x, y: y + 6, class: "cycle-label" }, label);
+    }
+  }
+
+  /* ===================================================================
+     8. THE GRAPH: |A×B| = AB sin θ, with A·B = AB cos θ for comparison
+     =================================================================== */
+  const GPAD = { left: 50, right: 14, top: 14, bottom: 30 };
+
+  function drawGraph() {
+    const svg = $("graph");
+    const W = svg.parentElement.clientWidth || 320, H = 190;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("height", H);
+    svg.replaceChildren();
+    const torque = mode === "torque";
+    const { A, B } = V();
+    const m = len3(A) * len3(B);
+    const top = m > EPS ? m * 1.12 : 1, bottom = torque ? -top * 0.12 : -top;
+    const x0 = GPAD.left, x1 = W - GPAD.right, y0 = GPAD.top, y1 = H - GPAD.bottom;
+    const X = (deg) => x0 + (deg / 180) * (x1 - x0);
+    const Y = (v) => y0 + ((top - v) / (top - bottom)) * (y1 - y0);
+
+    for (const deg of [0, 45, 90, 135, 180]) {
+      add(svg, "line", { x1: X(deg), y1: y0, x2: X(deg), y2: y1, class: "g-grid" });
+      add(svg, "text", { x: X(deg), y: y1 + 17, class: "g-tick" }, `${deg}°`);
+    }
+    for (const v of m > EPS ? (torque ? [0, m] : [-m, 0, m]) : [0]) {
+      add(svg, "line", { x1: x0, y1: Y(v), x2: x1, y2: Y(v), class: v === 0 ? "g-zero" : "g-grid" });
+      add(svg, "text", { x: x0 - 6, y: Y(v) + 4, class: "g-tick end" }, Math.abs(v - Math.round(v)) < 1e-9 ? fmtNum(v) : fmt1(v));
+    }
+    add(svg, "rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, class: "g-frame" });
+    const curve = (fn) => {
+      let d = "";
+      for (let i = 0; i <= 90; i++) d += `${i ? " L" : "M"}${X(i * 2).toFixed(1)} ${Y(m * fn(i * 2 * DEG)).toFixed(1)}`;
+      return d;
+    };
+    if (!torque) add(svg, "path", { d: curve(Math.cos), class: "g-cos" });
+    add(svg, "path", { d: curve(Math.sin), class: "g-sin" });
+    if (m > EPS) {
+      const th = angleBetween3(A, B), size = len3(cross3(A, B));
+      add(svg, "line", { x1: X(th), y1: y1, x2: X(th), y2: Y(Math.max(size, torque ? 0 : dot3(A, B))), class: "g-guide" });
+      if (!torque) add(svg, "circle", { cx: X(th), cy: Y(dot3(A, B)), r: 4, class: "g-dot cos" });
+      add(svg, "circle", { cx: X(th), cy: Y(size), r: 5.5, class: "g-dot" });
+    }
+  }
+
+  function graphAngle(clientX) {
+    const box = $("graph").getBoundingClientRect();
+    return clamp(((clientX - box.left - GPAD.left) / (box.width - GPAD.left - GPAD.right)) * 180, 0, 180);
+  }
+
+  // Turn B (or F) to make angle `deg` with A (or r), in the same plane, keeping its length.
+  function setAngle(deg) {
+    const { A, B } = V();
+    const lA = len3(A), lB = len3(B);
+    if (lA < EPS || lB < EPS) return;
+    const a = unit3(A);
+    let n = minus3(B, times3(a, dot3(B, a)));
+    n = len3(n) < 1e-6 ? perpendicularTo(A) : unit3(n);
+    const t = deg * DEG;
+    const nb = plus3(times3(a, Math.cos(t) * lB), times3(n, Math.sin(t) * lB));
+    V().B = vec(...[nb.x, nb.y, nb.z].map((c) => Math.round(c * 100) / 100));
+    render();
+  }
+
+  /* ===================================================================
+     9. NUMBERS AND WORKING
+     =================================================================== */
+  const row = (lhs, rhs) => `<span class="lhs">${lhs}</span><span class="rhs">${rhs}</span>`;
+  const det = (cells, cls = "") => `<span class="det ${cls}">${cells.map((c) => `<span>${c}</span>`).join("")}</span>`;
+  const p2 = (n) => `(${n})`;
+
+  // A vector written with î, ĵ and k̂, like 3î − 6ĵ + 2k̂ (numbers painted in a color).
+  function withUnits(p, paint = (s) => s) {
+    const terms = [];
+    for (const [c, u] of [[p.x, "î"], [p.y, "ĵ"], [p.z, "k̂"]]) {
+      if (Math.abs(c) < 0.005) continue;
+      const size = Math.abs(c);
+      terms.push({ minus: c < 0, text: `${Math.abs(size - 1) < 0.005 ? "" : paint(fmtNum(size))}${u}` });
+    }
+    if (!terms.length) return "0";
+    return terms.map((t, i) => (i === 0 ? `${t.minus ? "−" : ""}${t.text}` : ` ${t.minus ? "−" : "+"} ${t.text}`)).join("");
+  }
+  // "î", "−k̂" and so on, when a vector is exactly a unit vector along an axis.
+  function axisName(p) {
+    for (const [q, name] of [[vec(1, 0, 0), "î"], [vec(0, 1, 0), "ĵ"], [vec(0, 0, 1), "k̂"], [vec(-1, 0, 0), "−î"], [vec(0, -1, 0), "−ĵ"], [vec(0, 0, -1), "−k̂"]]) {
+      if (len3(minus3(p, q)) < 1e-9) return name;
+    }
+    return null;
+  }
+  const keyOf = (name) => ({ "î": "i", "ĵ": "j", "k̂": "k" })[name];
+
+  // Which Try button (Unit vectors) matches what's on screen: own, ij, jk, ki, ji or ii.
+  function tryState() {
+    const { A, B } = vectors.unit, nA = axisName(A), nB = axisName(B);
+    const pair = nA && nB ? `${keyOf(nA) || ""}${keyOf(nB) || ""}` : "";
+    return ["ij", "jk", "ki", "ji", "ii"].includes(pair) ? pair : "own";
+  }
+
+  function meaning(A, B, C) {
+    const torque = mode === "torque", lA = len3(A), lB = len3(B), lC = len3(C);
+    if (torque) {
+      if (lA < EPS) return "The force pushes right at the bolt, so there’s no lever arm and no torque.";
+      if (lB < EPS) return "No force, so no torque.";
+      if (lC < 1e-6) return "The force points along the handle, straight through the bolt, so it can’t turn the wrench: no torque.";
+      const t = unit3(C);
+      const turn = Math.abs(t.z) > 0.9
+        ? ` Seen from above, the wrench turns ${t.z > 0 ? "counterclockwise (τ points up, along +z)" : "clockwise (τ points down, along −z)"}.`
+        : " The wrench turns about the line τ points along.";
+      return `τ is at right angles to both r and F.${turn}`;
+    }
+    if (lA < EPS || lB < EPS) return "One vector has zero length, so the cross product is 0.";
+    if (lC < 1e-6) return `<b class="a-text">A</b> and <b class="b-text">B</b> are parallel (sin θ = 0), so <b class="a-text">A</b>×<b class="b-text">B</b> = 0.`;
+    if (mode === "unit") {
+      const nA = axisName(A), nB = axisName(B);
+      if (nA && nB) {
+        const k = `${keyOf(nA.replace("−", ""))}${keyOf(nB.replace("−", ""))}`;
+        const withArrows = ["ij", "jk", "ki"].includes(k);
+        return `${nA}×${nB} = ${withUnits(C)}: ${withArrows ? "following" : "going against"} the arrows round î → ĵ → k̂${withArrows ? " gives the next one" : " gives a minus sign"}${nA.includes("−") || nB.includes("−") ? ", and the minus on one vector flips the answer too" : ""}.`;
+      }
+    }
+    const right = Math.abs(angleBetween3(A, B) - 90) < 0.05 ? " They’re at right angles, so |A×B| = AB." : "";
+    return `At right angles to both <b class="a-text">A</b> and <b class="b-text">B</b>. Curl the fingers of your right hand from <b class="a-text">A</b> toward <b class="b-text">B</b>: your thumb points along <b class="c-text">A×B</b>.${right}`;
+  }
+
+  function updateMath() {
+    const torque = mode === "torque", unit = mode === "unit";
+    const { A, B } = V();
+    const C = cross3(A, B), lA = len3(A), lB = len3(B), lC = len3(C);
+    const N = NAMES[mode], u = torque ? " N·m" : "";
+    const vA = bold("a-text", N.a), vB = bold("b-text", N.b);
+    const lhs = torque ? bold("c-text", "τ") : `${vA}×${vB}`;
+    const n = fmtNum;
+
+    $("lenA").innerHTML = torque ? `<i>r</i> = ${fmt2(lA)} m` : unit ? `${vA} = ${withUnits(A, inA)}` : `|${vA}| = ${fmt2(lA)}`;
+    $("lenB").innerHTML = torque ? `<i>F</i> = ${fmt2(lB)} N` : unit ? `${vB} = ${withUnits(B, inB)}` : `|${vB}| = ${fmt2(lB)}`;
+    $("resultValue").innerHTML = `${torque ? `${lhs} = ${vA}×${vB}` : lhs} = ${withUnits(C)}${lC > EPS ? u : ""}`;
+    $("resultSize").innerHTML = torque ? `Magnitude: |τ| = ${fmt2(lC)} N·m` : `Magnitude: |${vA}×${vB}| = ${fmt2(lC)}`;
+    $("resultMeaning").innerHTML = meaning(A, B, C);
+
+    // From the determinant, as on the slides.
+    if (!unit) {
+      const ax = inA(n(A.x)), ay = inA(n(A.y)), az = inA(n(A.z)), bx = inB(n(B.x)), by = inB(n(B.y)), bz = inB(n(B.z));
+      const term = (v, unitVec, first) => `${first ? (v < 0 ? "−" : "") : v < 0 ? " − " : " + "}${n(Math.abs(v))}${unitVec}`;
+      $("detWork").innerHTML =
+        row(lhs, `= ${det(["î", "ĵ", "k̂", ax, ay, az, bx, by, bz])}`)
+        + row("", `= ${det([ay, az, by, bz], "two")} î + ${det([az, ax, bz, bx], "two")} ĵ + ${det([ax, ay, bx, by], "two")} k̂`)
+        + row("", `= [${p2(ay)}${p2(bz)} − ${p2(az)}${p2(by)}] î + [${p2(az)}${p2(bx)} − ${p2(ax)}${p2(bz)}] ĵ + [${p2(ax)}${p2(by)} − ${p2(ay)}${p2(bx)}] k̂`)
+        + row("", `= ${term(C.x, "î", true)}${term(C.y, "ĵ")}${term(C.z, "k̂")}`)
+        + row("", `= ${withUnits(C)}${lC > EPS ? u : ""}`);
+    }
+
+    // The diagonal trick (slide 4).
+    if (mode === "explore") drawSarrus(A, B, C);
+
+    // Magnitude from the angle (and, for torque, the lever arm).
+    if (!unit) {
+      const theta = angleBetween3(A, B), sin = Math.sin(theta * DEG);
+      const zero = lA < EPS || lB < EPS;
+      if (torque) {
+        $("sizeWork").innerHTML = row(bold("c-text", "τ"), "= <i>r F</i> sin φ")
+          + (zero ? row("", "= 0") : row("", `= (${inA(fmt2(lA))} m)(${inB(fmt2(lB))} N) sin ${fmt1(theta)}°`) + row("", `= ${fmt2(lA * lB * sin)} N·m`));
+        const arm = lA * sin;
+        $("sizeNote").innerHTML = zero ? "" : `The lever arm is the distance from the bolt to the line the force acts along: r⊥ = <i>r</i> sin φ = ${fmt2(arm)} m. So τ = r⊥ <i>F</i> = ${fmt2(arm)} m × ${fmt2(lB)} N = ${fmt2(arm * lB)} N·m. Pushing far from the bolt, at right angles to the handle, gives the most torque.`;
+      } else {
+        $("sizeWork").innerHTML = row(`|${vA}×${vB}|`, `= |${vA}| |${vB}| sin θ`)
+          + (zero ? row("", "= 0") : row("", `= (${inA(fmt2(lA))})(${inB(fmt2(lB))}) sin ${fmt1(theta)}°`) + row("", `= (${inA(fmt2(lA))})(${inB(fmt2(lB))})(${fmt3(sin)})`) + row("", `= ${fmt2(lA * lB * sin)}`));
+        $("sizeNote").innerHTML = zero ? "" : `That’s the area of the parallelogram made by ${vA} and ${vB}: base |${vA}| times height |${vB}| sin θ.`;
+      }
+    }
+
+    // Rules (slide 2), checked with the vectors on screen.
+    if (mode === "explore") {
+      const BA = cross3(B, A), theta = angleBetween3(A, B);
+      $("rules").innerHTML = [
+        `${vB}×${vA} = ${withUnits(BA)}, the same magnitude, pointing the other way: ${vA}×${vB} = −${vB}×${vA}.`,
+        `${vA}·(${vA}×${vB}) = ${n(dot3(A, C))} and ${vB}·(${vA}×${vB}) = ${n(dot3(B, C))}: ${vA}×${vB} is at right angles to both.`,
+        `If ${vA} ∥ ${vB}, ${vA}×${vB} = 0 (sin 0° = 0). So ${vA}×${vA} = 0 too.${lC < 1e-6 && lA > EPS && lB > EPS ? " That’s what you have now." : ""}`,
+        `If ${vA} ⊥ ${vB}, |${vA}×${vB}| = <i>AB</i> (sin 90° = 1).${Math.abs(theta - 90) < 0.05 ? " That’s what you have now." : ""}`,
+        `${vA}×(${vB} + <b>C</b>) = ${vA}×${vB} + ${vA}×<b>C</b>.`,
+        `<span style="white-space:nowrap">d/d<i>t</i> (${vA}×${vB}) = d${vA}/d<i>t</i> × ${vB} + ${vA} × d${vB}/d<i>t</i></span>, keeping the order.`,
+      ].map((s) => `<li>${s}</li>`).join("");
+    }
+
+    // Unit vectors: the live line, the part-by-part grid, and the circle.
+    if (unit) {
+      $("liveCross").innerHTML = `${lhs} = (${withUnits(A, inA)})×(${withUnits(B, inB)}) = <b>${withUnits(C)}</b>`;
+      const parts = [["x", "î", A.x, B.x], ["y", "ĵ", A.y, B.y], ["z", "k̂", A.z, B.z]];
+      for (const [k, uv, a, b] of parts) {
+        $(`row${k.toUpperCase()}`).innerHTML = `${inA(n(a))}${uv}`;
+        $(`col${k.toUpperCase()}`).innerHTML = `${inB(n(b))}${uv}`;
+      }
+      // What each unit vector times each unit vector gives: [sign, result]
+      const TABLE = { x: { x: [0, ""], y: [1, "k̂"], z: [-1, "ĵ"] }, y: { x: [-1, "k̂"], y: [0, ""], z: [1, "î"] }, z: { x: [1, "ĵ"], y: [-1, "î"], z: [0, ""] } };
+      const U = { x: "î", y: "ĵ", z: "k̂" };
+      for (const [r, , a] of parts) {
+        for (const [c, , , b] of parts) {
+          const [sign, res] = TABLE[r][c];
+          const how = `${p2(inA(n(a)))}${p2(inB(n(b)))}<br>${U[r]}×${U[c]} = ${sign ? `${sign < 0 ? "−" : ""}${res}` : "0"}`;
+          const value = sign ? withUnits({ x: 0, y: 0, z: 0, [{ "î": "x", "ĵ": "y", "k̂": "z" }[res]]: sign * a * b }) : "0";
+          $(`${r}${c}`).innerHTML = `<span class="cell-value">${value}</span><span class="cell-how">${how}</span>`;
+        }
+      }
+      const ax = inA(n(A.x)), ay = inA(n(A.y)), az = inA(n(A.z)), bx = inB(n(B.x)), by = inB(n(B.y)), bz = inB(n(B.z));
+      $("collect").innerHTML =
+        `<div>î boxes: ${p2(ay)}${p2(bz)} − ${p2(az)}${p2(by)} = <b>${n(C.x)}</b></div>`
+        + `<div>ĵ boxes: ${p2(az)}${p2(bx)} − ${p2(ax)}${p2(bz)} = <b>${n(C.y)}</b></div>`
+        + `<div>k̂ boxes: ${p2(ax)}${p2(by)} − ${p2(ay)}${p2(bx)} = <b>${n(C.z)}</b></div>`
+        + `<div>So ${lhs} = <b>${withUnits(C)}</b></div>`;
+      // Light up the matching product on the circle and in the lists.
+      const nA = axisName(A), nB = axisName(B);
+      const pair = nA && nB && !nA.includes("−") && !nB.includes("−") ? `${keyOf(nA)}${keyOf(nB)}` : "";
+      for (const span of document.querySelectorAll("#products [data-pair]")) span.classList.toggle("now", span.dataset.pair === pair);
+      const arcKey = { ij: "ij", jk: "jk", ki: "ki", ji: "ij", kj: "jk", ik: "ki" }[pair] || "";
+      for (const el of document.querySelectorAll("#cycle [data-arc]")) el.classList.toggle("on", el.dataset.arc === arcKey);
+      const state = tryState();
+      for (const button of document.querySelectorAll("[data-try]")) {
+        const inUse = button.dataset.try === state;
+        button.classList.toggle("on", inUse);
+        button.setAttribute("aria-pressed", String(inUse));
+      }
+    }
+  }
+
+  // The diagonal trick: î ĵ k̂ î ĵ over A's and B's components, repeated.
+  function drawSarrus(A, B, C) {
+    const svg = $("sarrus");
+    svg.replaceChildren();
+    const colX = (c) => 30 + c * 62, rowY = (r) => 22 + r * 36;
+    const units = ["î", "ĵ", "k̂", "î", "ĵ"];
+    const comps = (p) => [p.x, p.y, p.z, p.x, p.y];
+    // Which cells each diagonal goes through, for each part: [plus, minus]
+    const DIAG = {
+      x: [[[0, 0], [1, 1], [2, 2]], [[0, 3], [1, 2], [2, 1]]],
+      y: [[[0, 1], [1, 2], [2, 3]], [[0, 4], [1, 3], [2, 2]]],
+      z: [[[0, 2], [1, 3], [2, 4]], [[0, 2], [1, 1], [2, 0]]],
+    };
+    for (const part of ["x", "y", "z"]) {
+      if (part === sarrusPart) continue;
+      for (const d of DIAG[part]) add(svg, "line", { x1: colX(d[0][1]), y1: rowY(0), x2: colX(d[2][1]), y2: rowY(2), class: "s-faint" });
+    }
+    const [plusD, minusD] = DIAG[sarrusPart];
+    add(svg, "line", { x1: colX(plusD[0][1]), y1: rowY(0), x2: colX(plusD[2][1]), y2: rowY(2), class: "s-plus" });
+    add(svg, "line", { x1: colX(minusD[0][1]), y1: rowY(0), x2: colX(minusD[2][1]), y2: rowY(2), class: "s-minus" });
+    add(svg, "line", { x1: 4, y1: 6, x2: 4, y2: 108, class: "s-bar" });
+    add(svg, "line", { x1: colX(2) + 31, y1: 6, x2: colX(2) + 31, y2: 108, class: "s-bar" });
+    for (let c = 0; c < 5; c++) {
+      add(svg, "text", { x: colX(c), y: rowY(0) + 6, class: "s-cell unit halo" }, units[c]);
+      add(svg, "text", { x: colX(c), y: rowY(1) + 6, class: "s-cell a halo" }, fmtNum(comps(A)[c]));
+      add(svg, "text", { x: colX(c), y: rowY(2) + 6, class: "s-cell b halo" }, fmtNum(comps(B)[c]));
+    }
+    const pick = (cells) => cells.slice(1).map(([r, c]) => (r === 1 ? inA : inB)(fmtNum((r === 1 ? comps(A) : comps(B))[c])));
+    const [a1, b1] = pick(plusD), [a2, b2] = pick(minusD);
+    const uv = { x: "î", y: "ĵ", z: "k̂" }[sarrusPart];
+    $("sarrusLine").innerHTML = `${uv}: ${p2(a1)}${p2(b1)} − ${p2(a2)}${p2(b2)} = <b>${fmtNum(C[sarrusPart])}</b>`;
+    for (const b of document.querySelectorAll("[data-part]")) b.classList.toggle("on", b.dataset.part === sarrusPart);
+  }
+
+  // Keep the number boxes in step with the arrows (but leave a box alone while someone types in it).
+  const INPUTS = [["ax", "A", "x"], ["ay", "A", "y"], ["az", "A", "z"], ["bx", "B", "x"], ["by", "B", "y"], ["bz", "B", "z"]];
+  function updateInputs() {
+    for (const [id, key, axis] of INPUTS) {
+      const el = $(id);
+      if (el !== document.activeElement) el.value = inputText(V()[key][axis]);
+    }
+  }
+
+  function render() {
+    drawScene();
+    drawGraph();
+    updateMath();
+    updateInputs();
+  }
+
+  /* ===================================================================
+     10. DRAGGING, TURNING AND ZOOMING
+     =================================================================== */
+  const scene = $("scene");
+  const local = (e) => { const box = scene.getBoundingClientRect(); return { x: e.clientX - box.left, y: e.clientY - box.top }; };
+
+  // Move the dragged tip to the pointer, in the flat plane facing you through
+  // the tip (so it follows the pointer exactly), snapped to whole numbers or tenths.
+  function dragTo(e) {
+    const p = local(e);
+    const cx = (p.x - view.W / 2) / view.s + view.tx, cy = (view.H / 2 - p.y) / view.s + view.ty;
+    let w = plus3(plus3(times3(camera[0], cx), times3(camera[1], cy)), times3(camera[2], dragDepth));
+    if (mode === "torque" && dragging === "B") w = minus3(w, V().A);   // F starts at the end of r
+    const step = $("snap").checked ? 1 : 0.1;
+    const fit = (v) => Math.round(clamp(Math.round(v / step) * step, -6, 6) * 100) / 100;
+    const next = vec(fit(w.x), fit(w.y), fit(w.z));
+    const tip = V()[dragging];
+    if (next.x !== tip.x || next.y !== tip.y || next.z !== tip.z) {
+      V()[dragging] = next;
+      render();
+    }
+  }
+
+  function zoomBy(by) {
+    zoom = clamp(zoom * by, 0.3, 6);
+    if (Math.abs(zoom - 1) < 0.02) zoom = 1;
+    render();
+  }
+
+  const touches = new Map();
+  let turning = null, pinch = null;
+  scene.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") {
+      touches.set(e.pointerId, local(e));
+      if (touches.size === 2) {                 // a second finger: pinch to zoom
+        dragging = null;
+        turning = null;
+        const [a, b] = [...touches.values()];
+        pinch = { d: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), zoom };
+        scene.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    e.preventDefault();
+    scene.setPointerCapture(e.pointerId);
+    const hit = e.target.closest("[data-handle]");
+    if (hit) {
+      dragging = hit.getAttribute("data-handle");
+      const { A, B } = V();
+      const tipNow = dragging === "A" ? A : mode === "torque" ? plus3(A, B) : B;
+      dragDepth = dot3(camera[2], tipNow);
+      render();
+    } else {
+      turning = local(e);
+      scene.classList.add("turning");
+    }
+  });
+  scene.addEventListener("pointermove", (e) => {
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, local(e));
+    if (pinch && touches.size === 2) {
+      const [a, b] = [...touches.values()];
+      zoom = clamp(pinch.zoom * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d), 0.3, 6);
+      render();
+    } else if (dragging) {
+      dragTo(e);
+    } else if (turning) {
+      const p = local(e);
+      camera = pitch(yaw(camera, (p.x - turning.x) * 0.01), (p.y - turning.y) * 0.01);
+      turning = p;
+      render();
+    }
+  });
+  const lift = (e) => {
+    touches.delete(e.pointerId);
+    if (touches.size < 2) pinch = null;
+    if (turning) { turning = null; scene.classList.remove("turning"); }
+    if (dragging) { dragging = null; render(); }
+  };
+  scene.addEventListener("pointerup", lift);
+  scene.addEventListener("pointercancel", lift);
+  // Ctrl (or ⌘) + scroll, or a trackpad pinch, zooms. A plain scroll scrolls the page.
+  scene.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    zoomBy(Math.exp(-clamp(e.deltaY * (e.deltaMode === 1 ? 33 : 1), -100, 100) * 0.0025));
+  }, { passive: false });
+
+  /* ===================================================================
+     11. WIRING THE CONTROLS
+     =================================================================== */
+  function setMode(next) {
+    mode = next;
+    document.body.dataset.mode = mode;
+    camera = VIEWS[DEFAULT_VIEW[mode]]();
+    zoom = 1;
+    render();
+  }
+  for (const radio of document.querySelectorAll('input[name="mode"]')) {
+    radio.addEventListener("change", () => setMode(document.querySelector('input[name="mode"]:checked').value));
+  }
+
+  // Reset: this activity's vectors, every option and the view go back to how the page started.
+  $("reset").addEventListener("click", () => {
+    vectors[mode] = fresh(mode);
+    if (mode === "unit") savedOwn = null;
+    for (const box of document.querySelectorAll(".controls input[type=checkbox]")) box.checked = box.defaultChecked;
+    sarrusPart = "x";
+    setMode(mode);
+  });
+
+  for (const [id, key, axis] of INPUTS) {
+    $(id).addEventListener("input", () => {
+      const value = parseFloat($(id).value);
+      if (!Number.isFinite(value)) return;
+      V()[key][axis] = clamp(value, -6, 6);
+      render();
+    });
+    $(id).addEventListener("change", () => { $(id).value = inputText(V()[key][axis]); });
+  }
+
+  // Try buttons. Unit vectors keeps your own A and B before a Try button replaces them.
+  const triple = (text) => vec(...text.split(",").map(Number));
+  for (const button of document.querySelectorAll("[data-b]")) {
+    button.addEventListener("click", () => {
+      if (mode === "unit" && tryState() === "own") savedOwn = { A: { ...V().A }, B: { ...V().B } };
+      vectors[mode] = { A: triple(button.dataset.a), B: triple(button.dataset.b) };
+      render();
+    });
+  }
+  $("tryOwn").addEventListener("click", () => {
+    if (tryState() === "own") return;
+    const own = savedOwn || fresh("unit");
+    vectors.unit = { A: { ...own.A }, B: { ...own.B } };
+    render();
+  });
+  $("swap").addEventListener("click", () => {
+    const { A, B } = V();
+    vectors[mode] = { A: B, B: A };
+    render();
+  });
+
+  for (const box of document.querySelectorAll(".controls input[type=checkbox]")) box.addEventListener("change", render);
+  for (const button of document.querySelectorAll("[data-part]")) {
+    button.addEventListener("click", () => { sarrusPart = button.dataset.part; render(); });
+  }
+  for (const button of document.querySelectorAll("[data-view]")) {
+    button.addEventListener("click", () => { camera = VIEWS[button.dataset.view](); render(); });
+  }
+  $("zoomIn").addEventListener("click", () => zoomBy(1.25));
+  $("zoomOut").addEventListener("click", () => zoomBy(0.8));
+  $("zoomFit").addEventListener("click", () => { zoom = 1; render(); });
+
+  // Click or drag on the graph to set the angle.
+  const graph = $("graph");
+  let graphDrag = false;
+  graph.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    graphDrag = true;
+    graph.setPointerCapture(e.pointerId);
+    setAngle(graphAngle(e.clientX));
+  });
+  graph.addEventListener("pointermove", (e) => { if (graphDrag) setAngle(graphAngle(e.clientX)); });
+  graph.addEventListener("pointerup", () => { graphDrag = false; });
+  graph.addEventListener("pointercancel", () => { graphDrag = false; });
+
+  // Redraw at the new size whenever the diagram or the graph changes width.
+  const widths = new Map();
+  const resized = new ResizeObserver((entries) => {
+    let changed = false;
+    for (const entry of entries) {
+      const w = Math.round(entry.contentRect.width);
+      if (widths.get(entry.target) !== w) { widths.set(entry.target, w); changed = true; }
+    }
+    if (changed) render();
+  });
+  resized.observe($("sceneBox"));
+  resized.observe(graph.parentElement);
+
+  drawCycle();
+  render();
+})();
+</script>
+</body>
+</html>
